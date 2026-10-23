@@ -31,6 +31,27 @@ test('initialized Matter endpoints accept cloud state with correct units and sem
     const aggregator = new Endpoint(AggregatorEndpoint, { id: 'aggregator' });
     await server.add(aggregator);
     const cases = [
+      [
+        'switch',
+        {
+          functionalChannelType: 'SWITCH_MEASURING_CHANNEL',
+          on: true,
+          currentPowerConsumption: 42,
+          energyCounter: 1.5,
+        },
+        'OnOff',
+        'onOff',
+        true,
+        'BRAND_SWITCH_MEASURING',
+      ],
+
+      [
+        'thermostat',
+        { actualTemperature: 21.25, setPointTemperature: 22, humidity: 45.5 },
+        'Thermostat',
+        'localTemperature',
+        2125,
+      ],
       ['co2', { carbonDioxideConcentration: null }, 'CarbonDioxideConcentrationMeasurement', 'measuredValue', null],
       [
         'energy',
@@ -106,6 +127,7 @@ test('initialized Matter endpoints accept cloud state with correct units and sem
       ['occupancy', { presenceDetected: true }, 'OccupancySensing', 'occupancy', { occupied: true }],
       ['smoke', { smokeDetectorAlarmType: 'PRIMARY_ALARM' }, 'SmokeCoAlarm', 'smokeState', 2],
       ['switch', { on: true }, 'OnOff', 'onOff', true],
+      ['color', { dimLevel: 0.5 }, 'LevelControl', 'currentLevel', 127],
       ['dimmer', { dimLevel: 0.5 }, 'LevelControl', 'currentLevel', 127],
       ['cover', { shutterLevel: 0.75, processing: false }, 'WindowCovering', 'currentPositionLiftPercent100ths', 7500],
       [
@@ -146,10 +168,10 @@ test('initialized Matter endpoints accept cloud state with correct units and sem
         { energy: 1500000 },
       ],
     ];
-    for (const [index, [kind, channel, cluster, attribute, expected]] of cases.entries()) {
+    for (const [index, [kind, channel, cluster, attribute, expected, deviceType]] of cases.entries()) {
       const device = {
         id: `device${index}`,
-        type: 'PLUGABLE_SWITCH',
+        type: deviceType ?? 'PLUGABLE_SWITCH',
         label: 'Test',
         modelType: 'HmIP-Test',
         firmwareVersion: '1.0',
@@ -161,8 +183,50 @@ test('initialized Matter endpoints accept cloud state with correct units and sem
         { vendorId: 65521, lockPins: {}, command: async () => {}, error: assert.fail },
       );
       await aggregator.add(entity.endpoint);
+      assert.equal(entity.endpoint.getAttribute('BridgedDeviceBasicInformation', 'serialNumber'), device.id);
+      assert.equal(entity.endpoint.getAttribute('BridgedDeviceBasicInformation', 'uniqueId'), entity.endpoint.uniqueId);
       await entity.update(device, channel, {});
       assert.deepEqual(JSON.parse(JSON.stringify(entity.endpoint.getAttribute(cluster, attribute))), expected, kind);
+      if (deviceType === 'BRAND_SWITCH_MEASURING') {
+        const types = entity.endpoint
+          .getAttribute('Descriptor', 'deviceTypeList')
+          .map((type) => Number(type.deviceType));
+        assert.ok(types.includes(0x0100), 'BSM is an OnOffLight');
+        assert.ok(!types.includes(0x010f), 'BSM is not a mounted control');
+        assert.equal(entity.endpoint.getAttribute('ElectricalPowerMeasurement', 'activePower'), 42000);
+        assert.equal(
+          Number(entity.endpoint.getAttribute('ElectricalEnergyMeasurement', 'cumulativeEnergyImported').energy),
+          1500000,
+        );
+        await entity.update(device, { ...channel, on: false }, {});
+        assert.equal(entity.endpoint.getAttribute('OnOff', 'onOff'), false);
+      }
+      if (kind === 'thermostat' && 'humidity' in channel) {
+        assert.equal(entity.endpoint.getAttribute('Thermostat', 'occupiedHeatingSetpoint'), 2200);
+        assert.equal(entity.endpoint.getAttribute('RelativeHumidityMeasurement', 'measuredValue'), 4550);
+        const types = entity.endpoint
+          .getAttribute('Descriptor', 'deviceTypeList')
+          .map((type) => Number(type.deviceType));
+        assert.ok(types.includes(0x0301), 'thermostat device type');
+        assert.ok(types.includes(0x0307), 'humidity sensor device type');
+        assert.equal(entity.endpoint.hasClusterServer('TemperatureMeasurement'), false);
+        await entity.update(device, { ...channel, humidity: null }, {});
+        assert.equal(entity.endpoint.getAttribute('RelativeHumidityMeasurement', 'measuredValue'), null);
+        await entity.update(device, { ...channel, humidity: 50 }, {});
+        assert.equal(entity.endpoint.getAttribute('RelativeHumidityMeasurement', 'measuredValue'), 5000);
+      }
+      if (['dimmer', 'color', 'notification'].includes(kind)) {
+        for (const [dimLevel, level, on] of [
+          [0, 1, false],
+          [0.0001, 1, true],
+          [1, 254, true],
+          [0, 1, false],
+        ]) {
+          await entity.update(device, { ...channel, dimLevel }, {});
+          assert.equal(entity.endpoint.getAttribute('LevelControl', 'currentLevel'), level, `${kind}: ${dimLevel}`);
+          assert.equal(entity.endpoint.getAttribute('OnOff', 'onOff'), on, `${kind}: ${dimLevel}`);
+        }
+      }
     }
   } finally {
     await server?.close();

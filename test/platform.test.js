@@ -91,6 +91,13 @@ test('platform discovers, reconciles push events, recovers snapshots, and shuts 
     await platform.onStart();
     assert.equal(platform.entities.size, 2);
     assert.equal(platform.getDevices().length, 2, 'multi-channel names must not collide');
+    const selectDevices = platform.getSelectDevices();
+    assert.equal(selectDevices.length, 1);
+    assert.ok(platform.getDevices().every((endpoint) => endpoint.serialNumber.includes(selectDevices[0].serialNumber)));
+    assert.deepEqual(
+      platform.getDevices().map((endpoint) => endpoint.deviceName),
+      ['Same name – Switch 1', 'Same name – Switch 2'],
+    );
     const first = platform.entities.get(`${device.id}:1:switch`);
     assert.equal(first.endpoint.getAttribute('OnOff', 'onOff'), false);
     device.functionalChannels['1'].on = true;

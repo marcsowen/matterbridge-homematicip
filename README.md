@@ -137,8 +137,8 @@ Once your Homematic IP devices appear in Matterbridge:
 See the [Matterbridge documentation](https://github.com/Luligu/matterbridge#readme) for bridge modes and pairing help.
 You pair the bridge, rather than pairing each Homematic IP device separately.
 
-Multi-channel devices and devices with several sensors may appear as multiple accessories. Names include a short
-suffix to distinguish them; you can rename them in your smart home app. Changing a configurable input between button
+Multi-channel devices and devices with several sensors may appear as multiple accessories. Names use your Homematic IP labels, with readable channel or function
+suffixes where needed; you can rename them in your smart home app. Changing a configurable input between button
 and contact modes can replace the corresponding accessory, so check any automations that use it afterward.
 
 ## Supported devices and features
@@ -149,7 +149,7 @@ smart home app's support for the corresponding Matter features.
 | Homematic IP device family | What you can use in your smart home app |
 | --- | --- |
 | Switches, plugs, and multi-channel relay actuators | Switch individual outputs on and off |
-| Measuring switches and plugs | Switching, power consumption, and accumulated energy |
+| Measuring switches and plugs | Switching, power consumption, and accumulated energy; HmIP-BSM devices appear as on/off lights |
 | HmIP-ESI electricity meter interfaces (IEC or LED sensors) | Power and imported energy; exported energy where reported by an IEC meter |
 | Dimmers and RGBW lights | Brightness, plus color and color temperature where supported |
 | Notification light switches | Switching, brightness, and the device's available colors |
@@ -159,7 +159,7 @@ smart home app's support for the corresponding Matter features.
 | Buttons, remotes, and doorbell inputs | Short- and long-press events for automations |
 | Motion and presence detectors | Occupancy and brightness readings where available |
 | Climate and weather sensors | Temperature, humidity, brightness, and rain detection where available |
-| Radiator and wall thermostats | Current temperature and heating setpoint control |
+| Radiator and wall thermostats | Heating setpoint, current temperature, and humidity where available, combined on one thermostat endpoint |
 | Smoke detectors | Smoke alarms and reported low-battery status |
 | Water and rain detectors | Water/moisture or rain detection |
 | Door lock drives | Lock and unlock |

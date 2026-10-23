@@ -211,3 +211,37 @@ test('water supply valve sends explicit open/close commands and rejects timed op
     await e.endpoint.close();
   }
 });
+
+test('endpoint names are readable and serials retain the physical device ID', async () => {
+  const d = device('DIN_RAIL_SWITCH_4');
+  d.label = 'Licht Terrasse';
+  d.functionalChannels['2'] = { ...d.functionalChannels['1'], index: 2 };
+  const descriptions = describeDevice(d);
+  assert.deepEqual(
+    descriptions.map((e) => e.label),
+    ['Licht Terrasse – Switch 1', 'Licht Terrasse – Switch 2'],
+  );
+  const endpoints = descriptions.map(
+    (description) =>
+      new BridgedEntity(description, d, {
+        vendorId: 65521,
+        lockPins: {},
+        command: async () => {},
+        error: assert.fail,
+      }).endpoint,
+  );
+  try {
+    assert.equal(new Set(endpoints.map((e) => e.uniqueId)).size, 2);
+    assert.equal(new Set(endpoints.map((e) => e.serialNumber)).size, 1);
+    for (const [index, endpoint] of endpoints.entries()) {
+      assert.equal(endpoint.deviceName, descriptions[index].label);
+      assert.equal(endpoint.serialNumber, d.id);
+      assert.ok(Buffer.byteLength(endpoint.serialNumber) <= 32);
+    }
+  } finally {
+    for (const endpoint of endpoints) await endpoint.close();
+  }
+  const single = device();
+  single.label = 'Licht Garten';
+  assert.equal(describeDevice(single)[0].label, single.label);
+});

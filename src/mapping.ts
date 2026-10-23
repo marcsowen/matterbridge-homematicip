@@ -147,15 +147,52 @@ export function describeDevice(device: HmIPDevice): Entity[] {
     // Measurement capabilities can coexist with actuators (e.g. outdoor motion switches).
     if ('windowState' in c && !entities.some((e) => e.index === index && (e.kind === 'contact' || e.kind === 'button')))
       add('contact');
-    if ('actualTemperature' in c) add('temperature');
-    if ('humidity' in c) add('humidity');
+    const isThermostat = entities.some((entity) => entity.index === index && entity.kind === 'thermostat');
+    if (!isThermostat && 'actualTemperature' in c) add('temperature');
+    if (!isThermostat && 'humidity' in c) add('humidity');
     if ('illumination' in c || 'currentIllumination' in c || 'averageIllumination' in c) add('illuminance');
     if ('motionDetected' in c || 'presenceDetected' in c) add('occupancy');
     if ('raining' in c) add('rain');
     if ('carbonDioxideConcentration' in c) add('co2');
     if (c.functionalChannelType === 'WATERING_ACTUATOR_CHANNEL' && 'waterFlow' in c) add('flow');
   }
-  return entities;
+  const kindLabels: Record<Kind, string> = {
+    switch: 'Switch',
+    dimmer: 'Dimmer',
+    color: 'Light',
+    notification: 'Notification light',
+    cover: 'Shutter',
+    blind: 'Blind',
+    shading: 'Shading',
+    contact: 'Contact',
+    temperature: 'Temperature',
+    humidity: 'Humidity',
+    illuminance: 'Brightness',
+    occupancy: 'Occupancy',
+    smoke: 'Smoke alarm',
+    water: 'Water sensor',
+    rain: 'Rain',
+    button: 'Button',
+    lock: 'Lock',
+    lockSensor: 'Lock status',
+    thermostat: 'Thermostat',
+    valve: 'Valve',
+    garage: 'Garage door',
+    co2: 'CO₂',
+    energy: 'Energy',
+    soil: 'Soil moisture',
+    soilTemperature: 'Soil temperature',
+    flow: 'Water flow',
+    waterSupply: 'Water supply',
+    waterAlarm: 'Water alarm',
+  };
+  return entities.map((entity) => {
+    const sameLabel = entities.filter((other) => other.label === entity.label);
+    if (sameLabel.length === 1) return entity;
+    const sameKind = sameLabel.filter((other) => other.kind === entity.kind);
+    const suffix = `${kindLabels[entity.kind]}${sameKind.length > 1 ? ` ${entity.index}` : ''}`;
+    return { ...entity, label: `${entity.label} – ${suffix}` };
+  });
 }
 
 export function heatingGroup(device: HmIPDevice, groups: Readonly<Record<string, HmIPGroup>>) {

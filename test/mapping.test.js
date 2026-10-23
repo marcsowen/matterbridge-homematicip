@@ -178,3 +178,23 @@ test('electricity counters respect tariff direction, null values, and LED mode',
   assert.equal(meterEnergy({ connectedEnergySensorType: 'ES_LED', energyCounterOne: 12 }, 'export'), null);
   assert.equal(meterEnergy({}, 'import'), null);
 });
+
+test('wall thermostat retains one stable endpoint for temperature, setpoint and humidity', () => {
+  const channel = {
+    functionalChannelType: 'WALL_MOUNTED_THERMOSTAT_PRO_CHANNEL',
+    actualTemperature: 21,
+    humidity: null,
+    setPointTemperature: 22,
+  };
+  const entities = describeDevice(make('WALL_MOUNTED_THERMOSTAT_PRO', channel));
+  assert.deepEqual(
+    entities.map(({ id, kind }) => ({ id, kind })),
+    [{ id: 'device:1:thermostat', kind: 'thermostat' }],
+  );
+  assert.deepEqual(
+    describeDevice(make('TEMPERATURE_HUMIDITY_SENSOR_OUTDOOR', { actualTemperature: 21, humidity: 45 })).map(
+      (e) => e.kind,
+    ),
+    ['temperature', 'humidity'],
+  );
+});

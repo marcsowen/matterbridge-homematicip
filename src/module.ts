@@ -131,6 +131,19 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
 
   private async upsertDevice(device: HmIPDevice): Promise<void> {
     if (this.stopped) return;
+    const previous = this.devices.get(device.id);
+    const unreachable = (value: HmIPDevice) => {
+      const channel = Object.values(value.functionalChannels).find(
+        (channel) => 'unreach' in channel || 'lowBat' in channel,
+      );
+      return channel !== undefined && 'unreach' in channel && channel.unreach === true;
+    };
+    const isUnreachable = unreachable(device);
+    if (previous ? unreachable(previous) !== isUnreachable : isUnreachable) {
+      this.log.info(
+        `Homematic IP device "${device.label}" (${device.type}) is ${isUnreachable ? 'unreachable' : 'reachable again'} according to the cloud.`,
+      );
+    }
     this.devices.set(device.id, device);
     this.setSelectDevice(device.id, device.label);
     const descriptions =
@@ -152,7 +165,10 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
       try {
         let entity = this.entities.get(description.id);
         if (!entity) {
-          entity = new BridgedEntity(description, device, {
+          let label = description.label;
+          let number = 2;
+          while (this.hasDeviceName(label)) label = `${description.label} (${number++})`;
+          entity = new BridgedEntity({ ...description, label }, device, {
             vendorId: this.matterbridge.aggregatorVendorId,
             lockPins: this.settings.lockPins,
             command: (path, body) => {

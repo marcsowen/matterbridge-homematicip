@@ -18,6 +18,7 @@ import {
   MatterbridgeEndpoint,
   mountedOnOffControl,
   occupancySensor,
+  onOffLight,
   onOffPlugInUnit,
   rainSensor,
   smokeCoAlarm,
@@ -30,6 +31,7 @@ import {
 } from 'matterbridge';
 import { MatterbridgeColorControlServer, MatterbridgeValveConfigurationAndControlServer } from 'matterbridge/behaviors';
 import { Closure } from 'matterbridge/devices';
+import { BridgedDeviceBasicInformationServer } from 'matterbridge/matter/behaviors';
 import { ClosureControl, ColorControl } from 'matterbridge/matter/clusters';
 import {
   type Channel,
@@ -103,7 +105,9 @@ export class BridgedEntity {
       switch:
         device.type.includes('PLUGABLE') || device.type.includes('CABLE') || device.type === 'USB_SWITCH_MEASURING'
           ? onOffPlugInUnit
-          : mountedOnOffControl,
+          : device.type === 'BRAND_SWITCH_MEASURING'
+            ? onOffLight
+            : mountedOnOffControl,
       dimmer: dimmableLight,
       color: this.supportsHue ? extendedColorLight : this.supportsCt ? colorTemperatureLight : dimmableLight,
       notification: extendedColorLight,
@@ -132,9 +136,13 @@ export class BridgedEntity {
       waterSupply: waterValve,
       waterAlarm: waterLeakDetector,
     };
-    const serial = createHash('sha256').update(description.id).digest('hex').slice(0, 32);
-    const name = `${truncateUtf8(description.label, 14)} ${description.kind.slice(0, 6)} ${serial.slice(0, 8)}`;
+    const serial = device.id;
+    const uniqueId = createHash('sha256').update(description.id).digest('hex').slice(0, 32);
+    const name = description.label;
     const kind = description.kind;
+    const endpointTypes: [DeviceTypeDefinition, ...DeviceTypeDefinition[]] = [types[kind]];
+    if (this.metering) endpointTypes.push(electricalSensor);
+    if (kind === 'thermostat' && 'humidity' in this.channel) endpointTypes.push(humiditySensor);
     this.endpoint =
       kind === 'garage'
         ? new Closure(name, serial, {
@@ -146,11 +154,11 @@ export class BridgedEntity {
             movementDuration: 0,
             powerSourceType: 'None',
           })
-        : new MatterbridgeEndpoint(this.metering ? [types[kind], electricalSensor] : types[kind], {
+        : new MatterbridgeEndpoint(endpointTypes, {
             id: description.id,
           });
     this.endpoint.createDefaultBridgedDeviceBasicInformationClusterServer(
-      name,
+      truncateUtf8(name, 32),
       serial,
       context.vendorId,
       'eQ-3',
@@ -158,6 +166,12 @@ export class BridgedEntity {
       1,
       device.firmwareVersion.slice(0, 64),
     );
+    // Multiple endpoints share the hardware serial, but each has its own stable Matter identity.
+    this.endpoint.uniqueId = uniqueId;
+    const basicInformation = this.endpoint.getClusterServerOptions(BridgedDeviceBasicInformationServer);
+    if (basicInformation) basicInformation.uniqueId = uniqueId;
+    // Keep the full name in the frontend; Matter NodeLabel is limited to 32 bytes.
+    this.endpoint.deviceName = name;
     const maintenance = Object.values(device.functionalChannels).find((c) => {
       if (!isHmIPRecord(c)) return false;
       const base = c;
@@ -243,6 +257,7 @@ export class BridgedEntity {
         break;
       case 'thermostat':
         this.endpoint.createDefaultHeatingThermostatClusterServer(20, 20, 5, 30);
+        if ('humidity' in this.channel) this.endpoint.createDefaultRelativeHumidityMeasurementClusterServer(null);
         break;
       case 'valve':
         this.endpoint.createDefaultValveConfigurationAndControlClusterServer(0, undefined, 0, false);
@@ -552,10 +567,11 @@ export class BridgedEntity {
             'onOff',
             typeof c.on === 'boolean' ? c.on : finite(c.dimLevel) ? c.dimLevel > 0 : undefined,
           );
+          // Lighting levels are 1–254; off is represented by OnOff, not level zero.
           await set(
             'LevelControl',
             'currentLevel',
-            finite(c.dimLevel) ? Math.round(clamp(c.dimLevel, 0, 1) * 254) : undefined,
+            finite(c.dimLevel) ? clamp(Math.round(c.dimLevel * 254), 1, 254) : undefined,
           );
           const simple = typeof c.simpleRGBColorState === 'string' ? simpleColors[c.simpleRGBColorState] : undefined;
           if (this.supportsHue) {
@@ -718,8 +734,16 @@ export class BridgedEntity {
           break;
         case 'thermostat': {
           const group = heatingGroup(device, groups);
-          const actual = group?.actualTemperature ?? c.valveActualTemperature;
+          const actual = group?.actualTemperature ?? c.actualTemperature ?? c.valveActualTemperature;
           const target = group?.setPointTemperature ?? c.setPointTemperature;
+          if (e.hasClusterServer('RelativeHumidityMeasurement')) {
+            const humidity = c.humidity;
+            await set(
+              'RelativeHumidityMeasurement',
+              'measuredValue',
+              finite(humidity) ? Math.round(clamp(humidity, 0, 100) * 100) : null,
+            );
+          }
           await set('Thermostat', 'localTemperature', finite(actual) ? Math.round(actual * 100) : null);
           await set('Thermostat', 'occupiedHeatingSetpoint', finite(target) ? Math.round(target * 100) : undefined);
           const valve = group?.valvePosition ?? c.valvePosition;
