@@ -1,0 +1,57 @@
+{
+  "title": "Homematic IP",
+  "description": "Bridge Homematic IP cloud devices to Matter.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "default": "matterbridge-homematicip",
+      "readOnly": true
+    },
+    "type": {
+      "type": "string",
+      "default": "DynamicPlatform",
+      "readOnly": true
+    },
+    "accessPoint": {
+      "title": "Access Point / HCU ID",
+      "type": "string",
+      "description": "24 hexadecimal characters; spaces and hyphens are accepted."
+    },
+    "authToken": {
+      "title": "Cloud authentication token",
+      "type": "string",
+      "format": "password"
+    },
+    "excludedDevices": {
+      "title": "Excluded device IDs",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "lockPins": {
+      "title": "Door lock authorization PINs",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "format": "password",
+        "pattern": "^[0-9]*$"
+      },
+      "default": {}
+    },
+    "pin": {
+      "title": "Controller PIN (optional)",
+      "type": "string",
+      "format": "password",
+      "pattern": "^[0-9]*$"
+    }
+  },
+  "required": [
+    "name",
+    "type",
+    "accessPoint",
+    "authToken"
+  ]
+}

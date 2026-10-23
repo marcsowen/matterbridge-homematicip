@@ -1,0 +1,55 @@
+{
+  "name": "matterbridge-homematicip",
+  "version": "0.0.1",
+  "description": "Homematic IP plugin for matterbridge",
+  "license": "Apache-2.0",
+  "author": "Marc Sowen <marc@sowen.net>",
+  "keywords": [
+    "matterbridge",
+    "plugin",
+    "homematic",
+    "homematicip",
+    "hmip"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcsowen/matterbridge-homematicip"
+  },
+  "bugs": {
+    "url": "https://github.com/marcsowen/matterbridge-homematicip/issues"
+  },
+  "type": "module",
+  "main": "dist/module.js",
+  "types": "dist/module.d.ts",
+  "engines": {
+    "node": "^24.0.0"
+  },
+  "scripts": {
+    "clean": "node --input-type=module -e \"import {rmSync} from 'node:fs'; rmSync('dist', {recursive:true, force:true})\"",
+    "build": "npm run clean && tsc",
+    "lint": "biome check src test",
+    "format": "biome check --write src test",
+    "test": "npm run build && node --test test/*.test.js",
+    "check": "npm run lint && npm test",
+    "prepack": "npm run check"
+  },
+  "dependencies": {
+    "homematicip-cloud-client-ts": "^0.3.0"
+  },
+  "devDependencies": {
+    "matterbridge": "3.11.0",
+    "typescript": "7.0.2",
+    "@biomejs/biome": "2.6.2",
+    "@types/node": "24.19.2"
+  },
+  "files": [
+    "dist",
+    "matterbridge-homematicip.config.json",
+    "matterbridge-homematicip.schema.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "matterbridge": "^3.11.0"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "matterbridge-homematicip",
+  "type": "DynamicPlatform",
+  "accessPoint": "",
+  "authToken": "",
+  "excludedDevices": [],
+  "lockPins": {}
+}
