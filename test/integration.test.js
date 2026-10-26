@@ -204,6 +204,22 @@ test("initialized Matter endpoints accept cloud state with correct units and sem
                 entity.endpoint.uniqueId,
             );
             await entity.update(device, channel, {});
+            const batteryAttributes = entity.endpoint.getAttribute("PowerSource", "attributeList").map(Number);
+            assert.ok(!batteryAttributes.includes(0x0c), "unknown battery percentage is not advertised");
+            assert.ok(!batteryAttributes.includes(0x0b), "unmeasured battery voltage is not advertised");
+            assert.equal(entity.endpoint.getAttribute("PowerSource", "batChargeLevel"), 0);
+            const lowBatteryDevice = {
+                ...device,
+                functionalChannels: {
+                    ...device.functionalChannels,
+                    0: {...device.functionalChannels[0], lowBat: true},
+                },
+            };
+            await entity.update(lowBatteryDevice, channel, {});
+            assert.equal(entity.endpoint.getAttribute("PowerSource", "batChargeLevel"), 2);
+            assert.equal(entity.endpoint.getAttribute("BridgedDeviceBasicInformation", "reachable"), true);
+            await entity.update(device, channel, {});
+            assert.equal(entity.endpoint.getAttribute("PowerSource", "batChargeLevel"), 0);
             assert.deepEqual(
                 JSON.parse(JSON.stringify(entity.endpoint.getAttribute(cluster, attribute))),
                 expected,

@@ -37,10 +37,14 @@ import {
     waterValve,
     windowCovering,
 } from "matterbridge";
-import {MatterbridgeColorControlServer, MatterbridgeValveConfigurationAndControlServer} from "matterbridge/behaviors";
+import {
+    MatterbridgeColorControlServer,
+    MatterbridgePowerSourceServer,
+    MatterbridgeValveConfigurationAndControlServer,
+} from "matterbridge/behaviors";
 import {Closure} from "matterbridge/devices";
 import {BridgedDeviceBasicInformationServer} from "matterbridge/matter/behaviors";
-import {ClosureControl, ColorControl} from "matterbridge/matter/clusters";
+import {ClosureControl, ColorControl, PowerSource} from "matterbridge/matter/clusters";
 import {
     type Channel,
     clamp,
@@ -201,7 +205,19 @@ export class BridgedEntity {
             return features?.IOptionalFeatureLowBat === true || (!features && typeof base.lowBat === "boolean");
         });
         if (maintenance) {
-            this.endpoint.createDefaultPowerSourceBatteryClusterServer(null);
+            // HmIP reports a low-battery flag, not a percentage or measured voltage.
+            // Apple Home treats a null percentage as a failed read and can mark the accessory unreachable.
+            // Omit unsupported optional measurements rather than exposing null or invented values.
+            this.endpoint.behaviors.require(MatterbridgePowerSourceServer.with(PowerSource.Feature.Battery), {
+                status: PowerSource.PowerSourceStatus.Active,
+                order: 0,
+                description: "Primary battery",
+                endpointList: [],
+                batChargeLevel: PowerSource.BatChargeLevel.Ok,
+                batReplaceability: PowerSource.BatReplaceability.Unspecified,
+                batReplacementNeeded: false,
+                activeBatFaults: [],
+            });
         } else {
             this.endpoint.createDefaultPowerSourceWiredClusterServer();
         }

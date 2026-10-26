@@ -172,6 +172,8 @@ smart home app's support for the corresponding Matter features.
 
 ### Things to know
 
+- **Batteries:** Low-battery status is reported where available. Battery percentage and voltage are omitted because
+  the cloud does not provide those measurements for these devices.
 - **Heating:** Off sets the heating group to its minimum temperature in manual mode for frost protection; it does
   not fully disable heating. The app may show Heat again afterward. Manage automatic schedules, cooling, and boost
   in the Homematic IP app.
