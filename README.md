@@ -218,10 +218,22 @@ cd matterbridge-homematicip
 npm ci
 npm run build       # compile TypeScript
 npm run lint        # check formatting and code quality
+npm run format      # apply Biome formatting and fixes
 npm test            # build and run tests
 npm run check       # lint and tests
 npm pack --dry-run  # inspect package contents
 ```
+
+Biome defines the code formatting used by CI, approximating WebStorm's default TypeScript/JavaScript style:
+four-space indentation, double quotes, semicolons, and no spaces inside object/import braces.
+All formatter settings live in `biome.json`, including LF line endings, a final newline, and a preferred line width of
+120 characters. The fallback indentation for other supported languages is two spaces. WebStorm preserves existing quotes, semicolons, and trailing
+commas by default, while Biome normalizes them; we retain trailing commas on multiline constructs and parentheses
+around arrow-function parameters. Wrapping, alignment, and blank-line rules can still differ between the formatters.
+Developers who want matching formatting inside WebStorm can install the [Biome plugin](https://github.com/biomejs/biome-intellij),
+select this project's `node_modules/@biomejs/biome/bin/biome` as the Biome CLI if needed, and enable
+**LSP-based Code Formatting** in its settings. WebStorm's built-in formatter can still differ in wrapping and
+punctuation. `npm run format` applies the project style without requiring an IDE plugin.
 
 To test a built checkout with Matterbridge, run `matterbridge --add "$PWD"` from its directory. Keep the directory
 in place while registered. For Docker, mount the checkout into the container and register its path inside the container.
