@@ -38,7 +38,7 @@ to use this plugin.
 - A Homematic IP Access Point or a Home Control Unit (HmIP-HCU1) with cloud access enabled.
 - Homematic IP devices already set up in the Homematic IP app.
 - A working [Matterbridge installation](https://github.com/Luligu/matterbridge#readme), version 3.11.0 or newer
-  within version 3, running on Node.js 24 LTS.
+  within version 3, running on Node.js 24 or 26.
 - A Matter-compatible smart home app and any Matter controller or hub that app requires.
 - An internet connection: this plugin communicates with your devices through the Homematic IP cloud, even though
   the connection between Matterbridge and your Matter controller is local.
@@ -207,10 +207,10 @@ above and the app's Matter support.
 ## Development
 
 The plugin uses [homematicip-cloud-client-ts](https://github.com/marcsowen/homematicip-cloud-client-ts) for cloud
-communication, pairing, state validation, and connection lifecycle events. It is installed automatically;
+communication, pairing, typed commands, state validation, and synchronized WebSocket/snapshot sessions (version 0.4 or newer). It is installed automatically;
 users do not need to install or configure it separately.
 
-Development uses Node.js 24, TypeScript, and Biome:
+Development supports Node.js 24 and 26, with TypeScript and Biome. `.nvmrc` defaults to Node.js 24:
 
 ```sh
 git clone https://github.com/marcsowen/matterbridge-homematicip.git
@@ -232,7 +232,7 @@ reconciliation, event ordering, and shutdown. `src/pair.ts` provides the pairing
 
 Tests cover device mappings, configuration, conversions, command failures, initialized Matter endpoints, and
 connection recovery with simulated cloud responses. They do not access a real cloud account or replace physical-device
-and smart home app testing. CI runs on Node.js 24.
+and smart home app testing. CI runs lint, build, tests, and package checks on both Node.js 24 and 26.
 
 ## License
 

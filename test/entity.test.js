@@ -28,6 +28,9 @@ function make(kind, channel = {}, type = 'PLUGABLE_SWITCH') {
     command: async (path, body) => {
       calls.push({ path, body });
     },
+    deviceCommand: async (path, address, body) => {
+      calls.push({ path, body: { ...address, ...body } });
+    },
     error: assert.fail,
   });
   return { e, d, calls };
@@ -107,7 +110,7 @@ test('covering commands use closed percentages without HomeKit inversion', async
     [0, 1, 0.25],
   );
   assert.equal(calls[3].body.slatsLevel, 0.7);
-  assert.equal(calls[4].path, 'device/control/stop');
+  assert.equal(calls[4].path, 'stop');
   await e.endpoint.close();
 });
 test('read-only lock sensor rejects actuation', async () => {
@@ -149,9 +152,9 @@ test('concurrent brightness/off/on commands use the last successful brightness',
 test('failed cloud commands reject Matter requests and do not poison later commands', async () => {
   const { e, calls } = make('switch');
   let fail = true;
-  e.context.command = async (path, body) => {
+  e.context.deviceCommand = async (path, address, body) => {
     if (fail) throw new Error('cloud unavailable');
-    calls.push({ path, body });
+    calls.push({ path, body: { ...address, ...body } });
   };
   await assert.rejects(invoke(e, 'on'), /cloud unavailable/);
   fail = false;
@@ -180,7 +183,7 @@ test('universal light brightness-with-on/off commands actuate the switch too', a
   await invoke(e, 'moveToLevelWithOnOff', { level: 127 });
   assert.deepEqual(
     calls.map((call) => call.path),
-    ['device/control/setDimLevel', 'device/control/setSwitchState'],
+    ['setDimLevel', 'setSwitchState'],
   );
   assert.equal(calls[1].body.on, true);
   await e.endpoint.close();
@@ -203,8 +206,8 @@ test('water supply valve sends explicit open/close commands and rejects timed op
     assert.deepEqual(
       calls.map(({ path, body }) => [path, body.waterSupplyState, body.channelIndex]),
       [
-        ['device/control/setWaterSupplyState', 'FULL_OPENED', 1],
-        ['device/control/setWaterSupplyState', 'NO_WATERFLOW', 1],
+        ['setWaterSupplyState', 'FULL_OPENED', 1],
+        ['setWaterSupplyState', 'NO_WATERFLOW', 1],
       ],
     );
   } finally {
@@ -227,6 +230,7 @@ test('endpoint names are readable and serials retain the physical device ID', as
         vendorId: 65521,
         lockPins: {},
         command: async () => {},
+        deviceCommand: async () => {},
         error: assert.fail,
       }).endpoint,
   );

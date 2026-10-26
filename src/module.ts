@@ -1,8 +1,12 @@
 import {
+  getHmIPDeviceReachability,
   HmIPClient,
-  type HmIPConnectionListener,
+  type HmIPCommand,
   type HmIPDevice,
+  type HmIPDeviceCommand,
   type HmIPGroup,
+  HmIPSession,
+  type HmIPSessionTransport,
   type HmIPState,
   type HmIPStateChange,
 } from 'homematicip-cloud-client-ts';
@@ -12,11 +16,9 @@ import { type Configuration, parseConfig } from './config.js';
 import { BridgedEntity } from './entity.js';
 import { describeDevice } from './mapping.js';
 
-export interface CloudClient {
-  init(signal?: AbortSignal): Promise<boolean>;
-  getCurrentState(signal?: AbortSignal): Promise<HmIPState | false>;
-  connect(listener: (change: HmIPStateChange) => void, onConnection?: HmIPConnectionListener): void;
-  command(path: string, body: Record<string, unknown>): Promise<void>;
+export interface CloudClient extends HmIPSessionTransport {
+  command: HmIPCommand;
+  deviceCommand: HmIPDeviceCommand;
   shutdown(): void;
 }
 
@@ -34,10 +36,8 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
   private groups: Record<string, HmIPGroup> = {};
   private readonly settings: Configuration;
   private readonly client: CloudClient;
-  private readonly abort = new AbortController();
-  private retryTimer?: NodeJS.Timeout;
+  private session?: HmIPSession;
   private queue: Promise<void> = Promise.resolve();
-  private connected = false;
   private transportConnected = false;
   private stopped = false;
   private readonly unsupported = new Set<string>();
@@ -61,16 +61,18 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
   override async onStart(): Promise<void> {
     await this.ready;
     await this.clearSelect();
-    await this.enqueue(() => this.refresh());
-  }
-
-  private scheduleRetry(): void {
-    if (this.stopped || this.retryTimer) return;
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = undefined;
-      void this.enqueue(() => this.refresh());
-    }, 30_000);
-    this.retryTimer.unref();
+    this.session = new HmIPSession(this.client, {
+      snapshot: (state) => this.enqueue(() => this.applySnapshot(state)),
+      change: (change, state) => this.enqueue(() => this.applyChanges(change, state)),
+      status: (status) => {
+        this.transportConnected = status === 'ready';
+        return this.enqueue(async () => {
+          for (const device of this.devices.values()) await this.upsertDevice(device);
+        });
+      },
+      error: (error) => this.log.warn(`Homematic IP synchronization: ${error.message}`),
+    });
+    await this.session.start();
   }
 
   private enqueue(task: () => Promise<void>): Promise<void> {
@@ -79,51 +81,12 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
     });
     this.queue = next.catch(() => {
       // The client logs redacted diagnostics. Never dump cloud payloads, tokens, or lock PINs here.
-      this.log.error('Homematic IP synchronization failed; retrying automatically.');
-      this.scheduleRetry();
+      this.log.error('Homematic IP adapter update failed.');
     });
-    return this.queue;
+    return next;
   }
 
-  private async refresh(): Promise<void> {
-    if (!this.connected) {
-      if (!(await this.client.init(this.abort.signal))) {
-        this.log.warn(
-          'Homematic IP initialization failed; check credentials and connectivity. Retrying automatically.',
-        );
-        this.scheduleRetry();
-        return;
-      }
-      this.client.connect(
-        (change) => {
-          void this.enqueue(() => this.applyChanges(change));
-        },
-        (event) => {
-          if (this.stopped) return;
-          this.transportConnected = event !== 'disconnected';
-          void this.enqueue(async () => {
-            if (event === 'disconnected') {
-              if (this.transportConnected === false) {
-                for (const entity of this.entities.values()) await entity.reachable(false);
-              }
-            } else {
-              await this.refresh();
-            }
-          });
-        },
-      );
-      this.connected = true;
-    }
-    const state = await this.client.getCurrentState(this.abort.signal);
-    if (this.stopped) return;
-    if (!state) {
-      for (const entity of this.entities.values()) await entity.reachable(false);
-      this.log.warn('Homematic IP state is unavailable. Devices marked unreachable until the next successful update.');
-      this.scheduleRetry();
-      return;
-    }
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = undefined;
+  private async applySnapshot(state: HmIPState): Promise<void> {
     this.groups = state.groups;
     for (const id of this.devices.keys()) if (!state.devices[id]) await this.removeDevice(id);
     for (const device of Object.values(state.devices)) await this.upsertDevice(device);
@@ -132,14 +95,8 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
   private async upsertDevice(device: HmIPDevice): Promise<void> {
     if (this.stopped) return;
     const previous = this.devices.get(device.id);
-    const unreachable = (value: HmIPDevice) => {
-      const channel = Object.values(value.functionalChannels).find(
-        (channel) => 'unreach' in channel || 'lowBat' in channel,
-      );
-      return channel !== undefined && 'unreach' in channel && channel.unreach === true;
-    };
-    const isUnreachable = unreachable(device);
-    if (previous ? unreachable(previous) !== isUnreachable : isUnreachable) {
+    const isUnreachable = getHmIPDeviceReachability(device) === false;
+    if (previous ? (getHmIPDeviceReachability(previous) === false) !== isUnreachable : isUnreachable) {
       this.log.info(
         `Homematic IP device "${device.label}" (${device.type}) is ${isUnreachable ? 'unreachable' : 'reachable again'} according to the cloud.`,
       );
@@ -171,9 +128,13 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
           entity = new BridgedEntity({ ...description, label }, device, {
             vendorId: this.matterbridge.aggregatorVendorId,
             lockPins: this.settings.lockPins,
-            command: (path, body) => {
+            deviceCommand: (operation, address, body) => {
               if (this.stopped) return Promise.reject(new Error('Plugin is shutting down.'));
-              return this.client.command(path, body);
+              return this.client.deviceCommand(operation, address, body);
+            },
+            command: (operation, body) => {
+              if (this.stopped) return Promise.reject(new Error('Plugin is shutting down.'));
+              return this.client.command(operation, body);
             },
             error: (message) => this.log.error(message),
           });
@@ -183,9 +144,8 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
         await entity.update(device, description.channel, this.groups);
         if (this.transportConnected === false) await entity.reachable(false);
       } catch {
-        this.log.error(
-          `Could not synchronize ${device.type} channel ${description.index} (${description.kind}); retrying on the next update.`,
-        );
+        this.log.error(`Could not synchronize ${device.type} channel ${description.index} (${description.kind}).`);
+        throw new Error('Matter endpoint synchronization failed.');
       }
     }
   }
@@ -200,7 +160,8 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
     await this.clearDeviceSelect(id);
   }
 
-  private async applyChanges(change: HmIPStateChange): Promise<void> {
+  private async applyChanges(change: HmIPStateChange, state: HmIPState): Promise<void> {
+    this.groups = state.groups;
     let groupsChanged = false;
     for (const event of Object.values(change.events)) {
       switch (event.pushEventType) {
@@ -213,11 +174,9 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
           break;
         case 'GROUP_ADDED':
         case 'GROUP_CHANGED':
-          this.groups[event.group.id] = event.group;
           groupsChanged = true;
           break;
         case 'GROUP_REMOVED':
-          delete this.groups[event.group.id];
           groupsChanged = true;
           break;
         case 'DEVICE_CHANNEL_EVENT':
@@ -240,8 +199,7 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
 
   override async onShutdown(reason?: string): Promise<void> {
     this.stopped = true;
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.abort.abort();
+    await this.session?.stop();
     this.client.shutdown();
     await this.queue;
     this.entities.clear();

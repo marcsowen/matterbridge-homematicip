@@ -180,7 +180,7 @@ test('initialized Matter endpoints accept cloud state with correct units and sem
       const entity = new BridgedEntity(
         { id: `${device.id}:1:${kind}`, deviceId: device.id, kind, index: 1, label: 'Test', channel },
         device,
-        { vendorId: 65521, lockPins: {}, command: async () => {}, error: assert.fail },
+        { vendorId: 65521, lockPins: {}, command: async () => {}, deviceCommand: async () => {}, error: assert.fail },
       );
       await aggregator.add(entity.endpoint);
       assert.equal(entity.endpoint.getAttribute('BridgedDeviceBasicInformation', 'serialNumber'), device.id);

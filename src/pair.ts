@@ -26,7 +26,7 @@ if (!accessPoint || !/^[A-F0-9]{24}$/.test(accessPoint) || !output) {
     console.info(
       'For HCU: press the controller button before starting. For HAP: press the link button when it flashes.',
     );
-    if (!(await client.init(abort.signal))) throw new Error('Controller initialization failed.');
+    await client.init(abort.signal);
     const id = randomUUID();
     if (!(await client.authConnectionRequest(id, abort.signal))) throw new Error('Pairing request failed.');
     for (;;) {

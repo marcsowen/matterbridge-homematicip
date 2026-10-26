@@ -22,7 +22,7 @@
   "main": "dist/module.js",
   "types": "dist/module.d.ts",
   "engines": {
-    "node": "^24.0.0"
+    "node": "^24.0.0 || ^26.0.0"
   },
   "scripts": {
     "clean": "node --input-type=module -e \"import {rmSync} from 'node:fs'; rmSync('dist', {recursive:true, force:true})\"",
@@ -34,7 +34,7 @@
     "prepack": "npm run check"
   },
   "dependencies": {
-    "homematicip-cloud-client-ts": "^0.3.0"
+    "homematicip-cloud-client-ts": "^0.4.0"
   },
   "devDependencies": {
     "matterbridge": "3.11.0",

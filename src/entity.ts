@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { type HmIPDevice, type HmIPGroup, isHmIPRecord } from 'homematicip-cloud-client-ts';
+import {
+  getHmIPDeviceReachability,
+  type HmIPCommand,
+  type HmIPDevice,
+  type HmIPDeviceCommand,
+  type HmIPDeviceCommandBodies,
+  type HmIPGroup,
+  isHmIPRecord,
+} from 'homematicip-cloud-client-ts';
 import {
   airQualitySensor,
   type CommandHandlerFunction,
@@ -47,7 +55,8 @@ import {
 export interface EntityContext {
   vendorId: number;
   lockPins: Record<string, string>;
-  command(path: string, body: Record<string, unknown>): Promise<void>;
+  command: HmIPCommand;
+  deviceCommand: HmIPDeviceCommand;
   error(message: string): void;
 }
 
@@ -292,12 +301,15 @@ export class BridgedEntity {
     return finite(value) ? value : fallback;
   }
 
-  private send(operation: string, body: Record<string, unknown> = {}): Promise<void> {
-    return this.context.command(`device/control/${operation}`, {
-      deviceId: this.device.id,
-      channelIndex: this.description.index,
-      ...body,
-    });
+  private send<K extends keyof HmIPDeviceCommandBodies>(operation: K, body: HmIPDeviceCommandBodies[K]): Promise<void> {
+    return this.context.deviceCommand(
+      operation,
+      {
+        deviceId: this.device.id,
+        channelIndex: this.description.index,
+      },
+      body,
+    );
   }
 
   private addCommand<C extends CommandHandlers>(name: C, handler: CommandHandlerFunction<C>): void {
@@ -321,7 +333,9 @@ export class BridgedEntity {
         simpleRGBColorState:
           this.channel.simpleRGBColorState === 'BLACK' && dimLevel > 0
             ? 'WHITE'
-            : (this.channel.simpleRGBColorState ?? 'WHITE'),
+            : typeof this.channel.simpleRGBColorState === 'string'
+              ? this.channel.simpleRGBColorState
+              : 'WHITE',
         ...(optical ? { opticalSignalBehaviour: dimLevel > 0 ? 'ON' : 'OFF' } : {}),
       });
     } else await this.send('setDimLevel', { dimLevel });
@@ -413,7 +427,7 @@ export class BridgedEntity {
         );
       this.addCommand('upOrOpen', () => lift(0));
       this.addCommand('downOrClose', () => lift(1));
-      this.addCommand('stopMotion', () => this.send('stop'));
+      this.addCommand('stopMotion', () => this.send('stop', {}));
       this.addCommand('goToLiftPercentage', ({ request }) =>
         lift(clamp(request.liftPercent100thsValue / 10_000, 0, 1)),
       );
@@ -501,7 +515,7 @@ export class BridgedEntity {
     if (!group) throw new Error('Thermostat has no heating group.');
     if (temperature < (group.minTemperature ?? 5) || temperature > (group.maxTemperature ?? 30))
       throw new Error('Setpoint outside the heating group limits.');
-    await this.context.command('group/heating/setSetPointTemperature', {
+    await this.context.command('setHeatingSetPointTemperature', {
       groupId: group.id,
       setPointTemperature: Math.round(temperature * 2) / 2,
     });
@@ -511,7 +525,7 @@ export class BridgedEntity {
     const group = heatingGroup(this.device, this.groups);
     if (!group) throw new Error('Thermostat has no heating group.');
     if (![0, 4].includes(Number(mode))) throw new Error('Unsupported thermostat mode.');
-    await this.context.command('group/heating/setControlMode', {
+    await this.context.command('setHeatingControlMode', {
       groupId: group.id,
       controlMode: mode === 1 ? 'AUTOMATIC' : 'MANUAL',
     });
@@ -551,7 +565,7 @@ export class BridgedEntity {
       const maintenance = Object.values(device.functionalChannels).find((raw) => 'unreach' in raw || 'lowBat' in raw) as
         | Channel
         | undefined;
-      await this.reachable(maintenance?.unreach !== true);
+      await this.reachable(getHmIPDeviceReachability(device) !== false);
       if (typeof maintenance?.lowBat === 'boolean' && e.hasAttributeServer('PowerSource', 'batChargeLevel'))
         await set('PowerSource', 'batChargeLevel', maintenance.lowBat ? 2 : 0);
       switch (this.description.kind) {

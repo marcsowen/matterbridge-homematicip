@@ -9,6 +9,7 @@ import { AggregatorEndpoint } from 'matterbridge/matter/endpoints';
 import { HmIPPlatform } from '../dist/module.js';
 
 const drain = async (platform) => {
+  await platform.session?.whenIdle();
   await platform.queue;
 };
 test('platform discovers, reconciles push events, recovers snapshots, and shuts down', async () => {
@@ -37,9 +38,11 @@ test('platform discovers, reconciles push events, recovers snapshots, and shuts 
   };
   let state = { devices: { [device.id]: device }, groups: {}, home: {} };
   const client = {
-    init: async () => true,
+    init: async () => {},
+    disconnect() {},
     getCurrentState: async () => {
       snapshotCalls++;
+      if (state === false) throw new Error('Snapshot unavailable');
       return structuredClone(state);
     },
     connect: (callback, onConnection) => {
@@ -48,6 +51,7 @@ test('platform discovers, reconciles push events, recovers snapshots, and shuts 
       onConnection('connected');
     },
     command: async () => {},
+    deviceCommand: async () => {},
     shutdown: () => {
       shutdown = true;
     },
@@ -105,20 +109,16 @@ test('platform discovers, reconciles push events, recovers snapshots, and shuts 
     await drain(platform);
     assert.equal(first.endpoint.getAttribute('OnOff', 'onOff'), true);
     state = false;
-    await platform.enqueue(() => platform.refresh());
+    connectionListener('reconnected');
+    await drain(platform);
     assert.equal(first.endpoint.getAttribute('BridgedDeviceBasicInformation', 'reachable'), false);
     state = { devices: { [device.id]: device }, groups: {}, home: {} };
-    await platform.enqueue(() => platform.refresh());
+    connectionListener('reconnected');
+    await drain(platform);
     assert.equal(first.endpoint.getAttribute('BridgedDeviceBasicInformation', 'reachable'), true);
     connectionListener('disconnected');
     await drain(platform);
     assert.equal(first.endpoint.getAttribute('BridgedDeviceBasicInformation', 'reachable'), false);
-    await platform.enqueue(() => platform.refresh());
-    assert.equal(
-      first.endpoint.getAttribute('BridgedDeviceBasicInformation', 'reachable'),
-      false,
-      'REST success cannot conceal a known websocket outage',
-    );
     const callsBeforeReconnect = snapshotCalls;
     device.functionalChannels['1'].on = false;
     connectionListener('reconnected');
@@ -145,59 +145,4 @@ test('platform discovers, reconciles push events, recovers snapshots, and shuts 
     await environment.close();
     await rm(directory, { recursive: true, force: true });
   }
-});
-
-test('refresh retries failures but does not poll after recovery', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  let initOk = false;
-  let state = false;
-  let initCalls = 0;
-  let snapshotCalls = 0;
-  const platform = Object.assign(Object.create(HmIPPlatform.prototype), {
-    stopped: false,
-    connected: false,
-    abort: new AbortController(),
-    queue: Promise.resolve(),
-    entities: new Map(),
-    devices: new Map(),
-    log: { warn() {}, error() {} },
-    client: {
-      async init() {
-        initCalls++;
-        return initOk;
-      },
-      connect() {},
-      async getCurrentState() {
-        snapshotCalls++;
-        return state;
-      },
-    },
-  });
-  await platform.enqueue(() => platform.refresh());
-  assert.equal(initCalls, 1);
-  initOk = true;
-  t.mock.timers.tick(30_000);
-  await drain(platform);
-  assert.equal(initCalls, 2);
-  assert.equal(snapshotCalls, 1);
-  state = { devices: {}, groups: {} };
-  t.mock.timers.tick(30_000);
-  await drain(platform);
-  assert.equal(snapshotCalls, 2);
-  t.mock.timers.tick(600_000);
-  await drain(platform);
-  assert.equal(snapshotCalls, 2, 'healthy connections must not poll');
-
-  platform.client.getCurrentState = async () => {
-    snapshotCalls++;
-    throw new Error('temporary failure');
-  };
-  await platform.enqueue(() => platform.refresh());
-  t.mock.timers.tick(30_000);
-  await drain(platform);
-  assert.equal(snapshotCalls, 4, 'thrown errors also retry');
-  platform.stopped = true;
-  t.mock.timers.tick(30_000);
-  await drain(platform);
-  assert.equal(snapshotCalls, 4, 'pending retries do not run after shutdown');
 });
