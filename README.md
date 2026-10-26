@@ -212,7 +212,7 @@ The plugin uses [homematicip-cloud-client-ts](https://github.com/marcsowen/homem
 communication, pairing, typed commands, state validation, and synchronized WebSocket/snapshot sessions (version 0.4 or newer). It is installed automatically;
 users do not need to install or configure it separately.
 
-Development supports Node.js 24 and 26, with TypeScript and Biome. `.nvmrc` defaults to Node.js 24:
+Development supports Node.js 24 and 26, with TypeScript and Biome. Use either supported Node.js version:
 
 ```sh
 git clone https://github.com/marcsowen/matterbridge-homematicip.git
