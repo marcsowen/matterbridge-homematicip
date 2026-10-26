@@ -247,7 +247,11 @@ test("initialized Matter endpoints accept cloud state with correct units and sem
                 const types = entity.endpoint
                     .getAttribute("Descriptor", "deviceTypeList")
                     .map((type) => Number(type.deviceType));
-                assert.ok(types.includes(0x0301), "thermostat device type");
+                assert.equal(
+                    types[0],
+                    0x0301,
+                    "thermostat remains the first device type after endpoint initialization",
+                );
                 assert.ok(types.includes(0x0307), "humidity sensor device type");
                 assert.equal(entity.endpoint.hasClusterServer("TemperatureMeasurement"), false);
                 await entity.update(device, {...channel, humidity: null}, {});
