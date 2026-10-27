@@ -146,6 +146,7 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
                         label = `${description.label} (${number++})`;
                     }
                     entity = new BridgedEntity({...description, label}, device, {
+                        groups: this.groups,
                         vendorId: this.matterbridge.aggregatorVendorId,
                         lockPins: this.settings.lockPins,
                         deviceCommand: (operation, address, body) => {

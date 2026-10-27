@@ -258,6 +258,69 @@ test("initialized Matter endpoints accept cloud state with correct units and sem
                 assert.equal(entity.endpoint.getAttribute("RelativeHumidityMeasurement", "measuredValue"), null);
                 await entity.update(device, {...channel, humidity: 50}, {});
                 assert.equal(entity.endpoint.getAttribute("RelativeHumidityMeasurement", "measuredValue"), 5000);
+                const coolingChannel = {...channel, groups: ["climate"]};
+                const coolingDevice = {...device, id: "cooling-device", functionalChannels: {1: coolingChannel}};
+                const group = {
+                    id: "climate",
+                    type: "HEATING",
+                    cooling: false,
+                    coolingAllowed: true,
+                    actualTemperature: 26,
+                    setPointTemperature: 22,
+                    humidity: 50,
+                    minTemperature: 5,
+                    maxTemperature: 30,
+                    controlMode: "AUTOMATIC",
+                    valvePosition: null,
+                };
+                const calls = [];
+                const climate = new BridgedEntity(
+                    {
+                        id: "cooling-device:1:thermostat",
+                        deviceId: coolingDevice.id,
+                        kind,
+                        index: 1,
+                        label: "Cooling",
+                        channel: coolingChannel,
+                    },
+                    coolingDevice,
+                    {
+                        vendorId: 65521,
+                        lockPins: {},
+                        groups: {climate: group},
+                        command: async (operation, body) => calls.push({operation, body}),
+                        deviceCommand: async () => {},
+                        error: assert.fail,
+                    },
+                );
+                await aggregator.add(climate.endpoint);
+                const read = (attribute) => climate.endpoint.getAttribute("Thermostat", attribute);
+                assert.equal(read("featureMap").cooling, true);
+                assert.equal(read("featureMap").autoMode, false);
+                for (const cooling of [false, true, false]) {
+                    group.cooling = cooling;
+                    await climate.update(coolingDevice, coolingChannel, {climate: group});
+                    assert.equal(read("systemMode"), cooling ? 3 : 4);
+                    assert.equal(read(cooling ? "occupiedCoolingSetpoint" : "occupiedHeatingSetpoint"), 2200);
+                    assert.equal(read("thermostatRunningState").cool, cooling);
+                    assert.equal(read("thermostatRunningState").heat, false);
+                }
+                group.cooling = true;
+                group.actualTemperature = 20;
+                await climate.update(coolingDevice, coolingChannel, {climate: group});
+                assert.equal(read("thermostatRunningState").cool, false);
+                group.valvePosition = 0.5;
+                await climate.update(coolingDevice, coolingChannel, {climate: group});
+                assert.equal(read("thermostatRunningState").cool, true);
+                await assert.rejects(() => climate.setMode(4), /Unsupported thermostat mode/);
+                assert.equal(calls.length, 0, "mode mismatch must not issue any cloud commands");
+                await climate.setTemperature(23);
+                assert.deepEqual(calls.pop(), {
+                    operation: "setHeatingSetPointTemperature",
+                    body: {groupId: "climate", setPointTemperature: 23},
+                });
+                await climate.setMode(0);
+                assert.equal(calls.at(-1).body.setPointTemperature, 30, "Off in cooling uses the upper limit");
             }
             if (["dimmer", "color", "notification"].includes(kind)) {
                 for (const [dimLevel, level, on] of [

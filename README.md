@@ -159,7 +159,7 @@ smart home app's support for the corresponding Matter features.
 | Buttons, remotes, and doorbell inputs | Short- and long-press events for automations |
 | Motion and presence detectors | Occupancy and brightness readings where available |
 | Climate and weather sensors | Temperature, humidity, brightness, and rain detection where available |
-| Radiator and wall thermostats | Heating setpoint, current temperature, and humidity where available, combined on one thermostat endpoint |
+| Radiator and wall thermostats | Heating/cooling setpoint, current temperature, and humidity where available, combined on one thermostat endpoint |
 | Smoke detectors | Smoke alarms and reported low-battery status |
 | Water and rain detectors | Water/moisture or rain detection |
 | Door lock drives | Lock and unlock |
@@ -174,9 +174,11 @@ smart home app's support for the corresponding Matter features.
 
 - **Batteries:** Low-battery status is reported where available. Battery percentage and voltage are omitted because
   the cloud does not provide those measurements for these devices.
-- **Heating:** Off sets the heating group to its minimum temperature in manual mode for frost protection; it does
-  not fully disable heating. The app may show Heat again afterward. Manage automatic schedules, cooling, and boost
-  in the Homematic IP app.
+- **Thermostats:** Cooling is exposed when the cloud heating group reports cooling allowed or active at startup.
+  Restart the plugin after enabling cooling for a room. Heat/Cool state and the active setpoint follow Homematic IP;
+  changeover remains controlled by Homematic IP, not by individual Matter thermostats. Automatic schedules and boost
+  remain in the Homematic IP app. Off selects manual mode and the minimum temperature for heating or maximum for
+  cooling; it does not fully disable the system, and the app may show Heat/Cool again afterward.
 - **Lights:** Brightness levels and steps are supported. Continuous dimming commands are not supported, and fades
   follow the actuator's configuration. Set notification blink patterns in the Homematic IP app.
 - **Locks:** Unlocking a lock drive does not open its latch. A lock sensor only reports state and cannot operate the lock.

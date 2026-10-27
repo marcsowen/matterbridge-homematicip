@@ -40,11 +40,12 @@ import {
 import {
     MatterbridgeColorControlServer,
     MatterbridgePowerSourceServer,
+    MatterbridgeThermostatServer,
     MatterbridgeValveConfigurationAndControlServer,
 } from "matterbridge/behaviors";
 import {Closure} from "matterbridge/devices";
 import {BridgedDeviceBasicInformationServer} from "matterbridge/matter/behaviors";
-import {ClosureControl, ColorControl, PowerSource} from "matterbridge/matter/clusters";
+import {ClosureControl, ColorControl, PowerSource, Thermostat} from "matterbridge/matter/clusters";
 import {
     type Channel,
     clamp,
@@ -57,6 +58,7 @@ import {
 } from "./mapping.js";
 
 export interface EntityContext {
+    groups?: Readonly<Record<string, HmIPGroup>>;
     vendorId: number;
     lockPins: Record<string, string>;
     command: HmIPCommand;
@@ -104,6 +106,7 @@ export class BridgedEntity {
     private readonly supportsHue: boolean;
     private readonly supportsCt: boolean;
     private readonly metering: boolean;
+    private readonly supportsCooling: boolean;
 
     constructor(
         readonly description: Entity,
@@ -112,6 +115,9 @@ export class BridgedEntity {
     ) {
         this.channel = description.channel;
         this.device = device;
+        this.groups = context.groups ?? {};
+        const group = heatingGroup(device, this.groups);
+        this.supportsCooling = group?.cooling === true || (isHmIPRecord(group) && group.coolingAllowed === true);
         const features = this.channel.supportedOptionalFeatures as Record<string, unknown> | undefined;
         this.supportsHue = description.kind === "notification" || features?.IOptionalFeatureHueSaturationValue === true;
         this.supportsCt = features?.IOptionalFeatureColorTemperature === true;
@@ -302,7 +308,38 @@ export class BridgedEntity {
                 this.endpoint.createDefaultDoorLockClusterServer();
                 break;
             case "thermostat":
-                this.endpoint.createDefaultHeatingThermostatClusterServer(20, 20, 5, 30);
+                if (this.supportsCooling) {
+                    // Changeover belongs to the installation, not an individual room. Do not advertise AutoMode.
+                    this.endpoint.behaviors.require(
+                        MatterbridgeThermostatServer.with(Thermostat.Feature.Heating, Thermostat.Feature.Cooling),
+                        {
+                            controlSequenceOfOperation: Thermostat.ControlSequenceOfOperation.CoolingAndHeating,
+                            localTemperature: 2000,
+                            systemMode: Thermostat.SystemMode.Heat,
+                            occupiedHeatingSetpoint: 2000,
+                            minHeatSetpointLimit: 500,
+                            maxHeatSetpointLimit: 3000,
+                            absMinHeatSetpointLimit: 500,
+                            absMaxHeatSetpointLimit: 3000,
+                            thermostatRunningState: {
+                                heat: false,
+                                cool: false,
+                                fan: false,
+                                heatStage2: false,
+                                coolStage2: false,
+                                fanStage2: false,
+                                fanStage3: false,
+                            },
+                            occupiedCoolingSetpoint: 2000,
+                            minCoolSetpointLimit: 500,
+                            maxCoolSetpointLimit: 3000,
+                            absMinCoolSetpointLimit: 500,
+                            absMaxCoolSetpointLimit: 3000,
+                        },
+                    );
+                } else {
+                    this.endpoint.createDefaultHeatingThermostatClusterServer(20, 20, 5, 30);
+                }
                 if ("humidity" in this.channel) {
                     this.endpoint.createDefaultRelativeHumidityMeasurementClusterServer(null);
                 }
@@ -559,14 +596,22 @@ export class BridgedEntity {
             });
         }
         if (kind === "thermostat") {
-            e.subscribeAttribute("Thermostat", "occupiedHeatingSetpoint", (value: unknown, _old: unknown, context) => {
-                if (this.updating || !context.fabric || !finite(value)) {
-                    return;
-                }
-                void this.setTemperature(value / 100).catch(() =>
-                    this.context.error("Homematic IP rejected the thermostat setpoint."),
-                );
-            });
+            for (const attribute of this.supportsCooling
+                ? ["occupiedHeatingSetpoint", "occupiedCoolingSetpoint"]
+                : ["occupiedHeatingSetpoint"]) {
+                e.subscribeAttribute("Thermostat", attribute, (value: unknown, _old: unknown, context) => {
+                    if (this.updating || !context.fabric || !finite(value)) {
+                        return;
+                    }
+                    const cooling = heatingGroup(this.device, this.groups)?.cooling === true;
+                    if ((attribute === "occupiedCoolingSetpoint") !== cooling) {
+                        return;
+                    }
+                    void this.setTemperature(value / 100).catch(() =>
+                        this.context.error("Homematic IP rejected the thermostat setpoint."),
+                    );
+                });
+            }
             e.subscribeAttribute("Thermostat", "systemMode", (value: unknown, _old: unknown, context) => {
                 if (this.updating || !context.fabric) {
                     return;
@@ -602,15 +647,17 @@ export class BridgedEntity {
         if (!group) {
             throw new Error("Thermostat has no heating group.");
         }
-        if (![0, 4].includes(Number(mode))) {
+        if (mode !== 0 && mode !== (group.cooling === true ? 3 : 4)) {
             throw new Error("Unsupported thermostat mode.");
         }
         await this.context.command("setHeatingControlMode", {
             groupId: group.id,
-            controlMode: mode === 1 ? "AUTOMATIC" : "MANUAL",
+            controlMode: "MANUAL",
         });
         if (mode === 0) {
-            await this.setTemperature(group.minTemperature ?? 5);
+            await this.setTemperature(
+                group.cooling === true ? (group.maxTemperature ?? 30) : (group.minTemperature ?? 5),
+            );
         }
     }
 
@@ -869,6 +916,7 @@ export class BridgedEntity {
                     const group = heatingGroup(device, groups);
                     const actual = group?.actualTemperature ?? c.actualTemperature ?? c.valveActualTemperature;
                     const target = group?.setPointTemperature ?? c.setPointTemperature;
+                    const cooling = this.supportsCooling && group?.cooling === true;
                     if (e.hasClusterServer("RelativeHumidityMeasurement")) {
                         const humidity = c.humidity;
                         await set(
@@ -880,14 +928,20 @@ export class BridgedEntity {
                     await set("Thermostat", "localTemperature", finite(actual) ? Math.round(actual * 100) : null);
                     await set(
                         "Thermostat",
-                        "occupiedHeatingSetpoint",
+                        cooling ? "occupiedCoolingSetpoint" : "occupiedHeatingSetpoint",
                         finite(target) ? Math.round(target * 100) : undefined,
                     );
                     const valve = group?.valvePosition ?? c.valvePosition;
-                    const heat = finite(valve) ? valve > 0 : finite(actual) && finite(target) ? actual < target : false;
+                    const active = finite(valve)
+                        ? valve > 0
+                        : finite(actual) && finite(target)
+                          ? cooling
+                              ? actual > target
+                              : actual < target
+                          : false;
                     await set("Thermostat", "thermostatRunningState", {
-                        heat,
-                        cool: false,
+                        heat: !cooling && active,
+                        cool: cooling && active,
                         fan: false,
                         heatStage2: false,
                         coolStage2: false,
@@ -897,7 +951,19 @@ export class BridgedEntity {
                     if (group) {
                         await set("Thermostat", "minHeatSetpointLimit", Math.round((group.minTemperature ?? 5) * 100));
                         await set("Thermostat", "maxHeatSetpointLimit", Math.round((group.maxTemperature ?? 30) * 100));
-                        await set("Thermostat", "systemMode", 4);
+                        if (this.supportsCooling) {
+                            await set(
+                                "Thermostat",
+                                "minCoolSetpointLimit",
+                                Math.round((group.minTemperature ?? 5) * 100),
+                            );
+                            await set(
+                                "Thermostat",
+                                "maxCoolSetpointLimit",
+                                Math.round((group.maxTemperature ?? 30) * 100),
+                            );
+                        }
+                        await set("Thermostat", "systemMode", cooling ? 3 : 4);
                     }
                     break;
                 }
