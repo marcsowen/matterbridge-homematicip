@@ -1,4 +1,10 @@
-import {type HmIPDevice, type HmIPGroup, isHmIPHeatingGroup, isHmIPRecord} from "homematicip-cloud-client-ts";
+import {
+    getHmIPDeviceReachability,
+    type HmIPDevice,
+    type HmIPGroup,
+    isHmIPHeatingGroup,
+    isHmIPRecord,
+} from "homematicip-cloud-client-ts";
 import {deviceKinds} from "./catalog.js";
 
 export type Kind =
@@ -285,4 +291,64 @@ export function meterEnergy(channel: Channel, direction: "import" | "export"): n
         total += value;
     }
     return Number.isFinite(total) ? total : null;
+}
+
+/** Cloud-reported activity, with undefined meaning unknown rather than inactive. */
+export function thermostatActivity(
+    device: HmIPDevice,
+    channel: Channel,
+    groups: Readonly<Record<string, HmIPGroup>>,
+    devices: Readonly<Record<string, HmIPDevice>>,
+): boolean | undefined {
+    const position = (value: unknown): boolean | undefined =>
+        finite(value) && value >= 0 && value <= 1 ? value > 0 : undefined;
+    if (getHmIPDeviceReachability(device) === false) {
+        return undefined;
+    }
+    // An individual radiator must never inherit another radiator's activity.
+    if (channel.functionalChannelType === "HEATING_THERMOSTAT_CHANNEL") {
+        return position(channel.valvePosition);
+    }
+    const group = heatingGroup(device, groups);
+    const groupActivity = position(group?.valvePosition);
+    if (groupActivity !== undefined) {
+        return groupActivity;
+    }
+    const values: (boolean | undefined)[] = [];
+    for (const actuator of Object.values({...devices, [device.id]: device})) {
+        for (const raw of Object.values(actuator.functionalChannels)) {
+            if (!isHmIPRecord(raw)) {
+                continue;
+            }
+            const ownRelay = actuator.id === device.id && raw.functionalChannelType === "INTERNAL_SWITCH_CHANNEL";
+            const configurableValve =
+                raw.functionalChannelType === "FLOOR_TERMINAL_BLOCK_LOCAL_PUMP_CHANNEL" &&
+                raw.channelRole === "FLOOR_HEATING_COOLING_CONTROLLER";
+            const linked = group && Array.isArray(raw.groups) && raw.groups.includes(group.id);
+            if (
+                !ownRelay &&
+                (!linked ||
+                    !(
+                        configurableValve ||
+                        [
+                            "HEATING_THERMOSTAT_CHANNEL",
+                            "FLOOR_TERMINAL_BLOCK_CHANNEL",
+                            "FLOOR_TERMINAL_BLOCK_MECHANIC_CHANNEL",
+                            "INTERNAL_SWITCH_CHANNEL",
+                        ].includes(String(raw.functionalChannelType))
+                    ))
+            ) {
+                continue;
+            }
+            // A local pump output belongs to the installation, not to room valve activity.
+            if (raw.channelRole === "LOCAL_PUMP") {
+                continue;
+            }
+            values.push(getHmIPDeviceReachability(actuator) === false ? undefined : position(raw.valvePosition));
+        }
+    }
+    if (values.includes(true)) {
+        return true;
+    }
+    return values.length && values.every((value) => value === false) ? false : undefined;
 }

@@ -243,6 +243,10 @@ test("initialized Matter endpoints accept cloud state with correct units and sem
             }
             if (kind === "thermostat" && "humidity" in channel) {
                 assert.equal(entity.endpoint.getAttribute("Thermostat", "occupiedHeatingSetpoint"), 2200);
+                assert.ok(
+                    !entity.endpoint.getAttribute("Thermostat", "attributeList").map(Number).includes(0x29),
+                    "no running state without cloud valve data, even below the setpoint",
+                );
                 assert.equal(entity.endpoint.getAttribute("RelativeHumidityMeasurement", "measuredValue"), 4550);
                 const types = entity.endpoint
                     .getAttribute("Descriptor", "deviceTypeList")
@@ -271,8 +275,15 @@ test("initialized Matter endpoints accept cloud state with correct units and sem
                     minTemperature: 5,
                     maxTemperature: 30,
                     controlMode: "AUTOMATIC",
-                    valvePosition: null,
+                    valvePosition: 0.5,
                 };
+                const linkedValve = {
+                    functionalChannelType: "FLOOR_TERMINAL_BLOCK_MECHANIC_CHANNEL",
+                    groups: ["climate"],
+                    valvePosition: 0.5,
+                };
+                const linkedDevice = {...device, id: "linked-actuator", functionalChannels: {1: linkedValve}};
+                group.valvePosition = null;
                 const calls = [];
                 const climate = new BridgedEntity(
                     {
@@ -289,6 +300,7 @@ test("initialized Matter endpoints accept cloud state with correct units and sem
                         lockPins: {},
                         groups: {climate: group},
                         coolingEnabled: true,
+                        getDevices: () => ({[linkedDevice.id]: linkedDevice}),
                         command: async (operation, body) => calls.push({operation, body}),
                         deviceCommand: async () => {},
                         error: assert.fail,
@@ -330,15 +342,23 @@ test("initialized Matter endpoints accept cloud state with correct units and sem
                     assert.equal(read("systemMode"), cooling ? 3 : 4);
                     assert.equal(read(cooling ? "occupiedCoolingSetpoint" : "occupiedHeatingSetpoint"), 2200);
                     assert.equal(read("thermostatRunningState").cool, cooling);
-                    assert.equal(read("thermostatRunningState").heat, false);
+                    assert.equal(read("thermostatRunningState").heat, !cooling);
                 }
                 group.cooling = true;
                 group.actualTemperature = 20;
+                linkedValve.valvePosition = 0;
                 await climate.update(coolingDevice, coolingChannel, {climate: group});
                 assert.equal(read("thermostatRunningState").cool, false);
-                group.valvePosition = 0.5;
+                linkedValve.valvePosition = 0.5;
                 await climate.update(coolingDevice, coolingChannel, {climate: group});
                 assert.equal(read("thermostatRunningState").cool, true);
+                linkedValve.valvePosition = null;
+                await climate.update(coolingDevice, coolingChannel, {climate: group});
+                assert.equal(
+                    read("thermostatRunningState").cool,
+                    true,
+                    "missing measurements retain the last cloud value",
+                );
                 await assert.rejects(() => climate.setMode(4), /Unsupported thermostat mode/);
                 assert.equal(calls.length, 0, "mode mismatch must not issue any cloud commands");
                 await climate.setTemperature(23);

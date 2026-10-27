@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 import {deviceKinds} from "../dist/catalog.js";
 import {parseConfig} from "../dist/config.js";
-import {describeDevice, heatingGroup, illuminance, meterEnergy, percent100ths} from "../dist/mapping.js";
+import {
+    describeDevice,
+    heatingGroup,
+    illuminance,
+    meterEnergy,
+    percent100ths,
+    thermostatActivity,
+} from "../dist/mapping.js";
 
 const make = (type, channel) => ({
     id: "device",
@@ -212,5 +219,82 @@ test("wall thermostat retains one stable endpoint for temperature, setpoint and 
             (e) => e.kind,
         ),
         ["temperature", "humidity"],
+    );
+});
+
+test("room activity aggregates associated valve channels without temperature inference", () => {
+    const room = {
+        id: "room",
+        type: "HEATING",
+        cooling: false,
+        setPointTemperature: 24,
+        actualTemperature: 20,
+        humidity: null,
+        minTemperature: 5,
+        maxTemperature: 30,
+        controlMode: "AUTOMATIC",
+        valvePosition: null,
+    };
+    const channel = {functionalChannelType: "WALL_MOUNTED_THERMOSTAT_PRO_CHANNEL", groups: ["room"]};
+    const wall = {...make("WALL_MOUNTED_THERMOSTAT", channel), id: "wall"};
+    const actuator = {...make("ANY_MODEL", {}), id: "actuator", functionalChannels: {}};
+    const activity = () => thermostatActivity(wall, channel, {room}, {actuator});
+    assert.equal(activity(), undefined);
+    for (const type of [
+        "HEATING_THERMOSTAT_CHANNEL",
+        "FLOOR_TERMINAL_BLOCK_CHANNEL",
+        "FLOOR_TERMINAL_BLOCK_MECHANIC_CHANNEL",
+    ]) {
+        actuator.functionalChannels = {
+            1: {functionalChannelType: type, groups: ["room"], valvePosition: 0},
+            2: {functionalChannelType: type, groups: ["room"], valvePosition: 0.35},
+            3: {functionalChannelType: type, groups: ["other"], valvePosition: 1},
+        };
+        assert.equal(activity(), true, type);
+        actuator.functionalChannels[2].valvePosition = 0;
+        assert.equal(activity(), false, type);
+        actuator.functionalChannels[2].valvePosition = null;
+        assert.equal(activity(), undefined, type);
+        actuator.functionalChannels[1].valvePosition = 1;
+        assert.equal(activity(), true, type);
+        actuator.functionalChannels[0] = {functionalChannelType: "DEVICE_BASE", unreach: true};
+        assert.equal(activity(), undefined, type);
+    }
+    actuator.functionalChannels = {
+        1: {
+            functionalChannelType: "FLOOR_TERMINAL_BLOCK_LOCAL_PUMP_CHANNEL",
+            channelRole: "FLOOR_HEATING_COOLING_CONTROLLER",
+            groups: ["room"],
+            valvePosition: 0,
+        },
+    };
+    assert.equal(activity(), false, "configurable first output used as a valve is included");
+    actuator.functionalChannels[1].valvePosition = 1;
+    assert.equal(activity(), true);
+    actuator.functionalChannels[1].channelRole = "LOCAL_PUMP";
+    assert.equal(activity(), undefined, "a pump output is not room valve activity");
+    delete actuator.functionalChannels[1].channelRole;
+    assert.equal(activity(), undefined, "an unknown output role is not assumed to be a valve");
+    actuator.functionalChannels = {};
+    wall.functionalChannels[2] = {functionalChannelType: "INTERNAL_SWITCH_CHANNEL", valvePosition: 1};
+    assert.equal(activity(), true);
+    wall.functionalChannels[2].valvePosition = 0;
+    assert.equal(activity(), false);
+    room.valvePosition = 0.2;
+    assert.equal(activity(), true, "a supplied room value takes precedence");
+    const radiatorChannel = {functionalChannelType: "HEATING_THERMOSTAT_CHANNEL", groups: ["room"], valvePosition: 0};
+    const radiator = make("HEATING_THERMOSTAT", radiatorChannel);
+    assert.equal(
+        thermostatActivity(radiator, radiatorChannel, {room}, {wall}),
+        false,
+        "closed radiator does not inherit room activity",
+    );
+    radiatorChannel.valvePosition = null;
+    assert.equal(thermostatActivity(radiator, radiatorChannel, {room}, {wall}), undefined);
+    radiatorChannel.valvePosition = 0.4;
+    assert.equal(
+        thermostatActivity(radiator, radiatorChannel, {}, {}),
+        true,
+        "radiator activity works without a wall thermostat or group measurement",
     );
 });

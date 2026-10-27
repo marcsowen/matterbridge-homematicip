@@ -36,6 +36,7 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
     private readonly devices = new Map<string, HmIPDevice>();
     private groups: Record<string, HmIPGroup> = {};
     private coolingEnabled = false;
+    private cloudDevices: Readonly<Record<string, HmIPDevice>> = {};
     private readonly settings: Configuration;
     private readonly client: CloudClient;
     private session?: HmIPSession;
@@ -96,6 +97,7 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
 
     private async applySnapshot(state: HmIPState): Promise<void> {
         this.groups = state.groups;
+        this.cloudDevices = state.devices;
         this.coolingEnabled = Object.values(state.home?.functionalHomes ?? {}).some(
             (solution) => isHmIPRecord(solution) && solution.coolingEnabled === true,
         );
@@ -152,6 +154,7 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
                     }
                     entity = new BridgedEntity({...description, label}, device, {
                         groups: this.groups,
+                        getDevices: () => this.cloudDevices,
                         coolingEnabled: this.coolingEnabled,
                         vendorId: this.matterbridge.aggregatorVendorId,
                         lockPins: this.settings.lockPins,
@@ -199,6 +202,7 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
 
     private async applyChanges(change: HmIPStateChange, state: HmIPState): Promise<void> {
         this.groups = state.groups;
+        this.cloudDevices = state.devices;
         this.coolingEnabled = Object.values(state.home?.functionalHomes ?? {}).some(
             (solution) => isHmIPRecord(solution) && solution.coolingEnabled === true,
         );
@@ -231,7 +235,11 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
                     break;
             }
         }
-        if (groupsChanged) {
+        // Actuator updates can affect a wall thermostat even without a GROUP_CHANGED event.
+        const devicesChanged = Object.values(change.events).some((event) =>
+            ["DEVICE_ADDED", "DEVICE_CHANGED", "DEVICE_REMOVED"].includes(event.pushEventType),
+        );
+        if (groupsChanged || devicesChanged) {
             for (const device of this.devices.values()) {
                 await this.upsertDevice(device);
             }

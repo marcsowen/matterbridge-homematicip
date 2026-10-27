@@ -179,6 +179,19 @@ smart home app's support for the corresponding Matter features.
   changeover remains controlled by Homematic IP, not by individual Matter thermostats. Automatic schedules and boost
   remain in the Homematic IP app. Off selects manual mode and the minimum temperature for heating or maximum for
   cooling; it does not fully disable the system, and the app may show Heat/Cool again afterward.
+- **Thermostat activity:** Heating/cooling activity is reported only when a valve position is available at startup.
+  Radiators use their own valve position. Wall thermostats use the cloud room value when available, otherwise
+  associated radiator, underfloor actuator or internal relay channels: any open valve means active, and all must
+  report zero to mean inactive. Missing or unreachable valve readings are unknown. Temperature differences are
+  never used to infer activity, and no averaged room valve position is invented. Without valve data, the
+  optional running-state attribute is omitted. If valve data later becomes unavailable, the last reported state is
+  retained. Smart home apps may display their own fallback when activity is not provided.
+- **Apple Home and Eve activity display:** In testing, Apple's HomeKit representation reported “Heating” when the
+  measured temperature was below the setpoint, even while the plugin reported no heating activity through Matter.
+  Changing the setpoint changed the displayed activity immediately, without a change in actuator power. Eve uses
+  this HomeKit information too. Treat the displayed “Heating” state as inferred demand, not confirmation that a
+  valve is open or an actuator is powered. The plugin continues to report cloud-derived valve activity;
+  this display behaviour may vary with Apple software versions.
 - **Lights:** Brightness levels and steps are supported. Continuous dimming commands are not supported, and fades
   follow the actuator's configuration. Set notification blink patterns in the Homematic IP app.
 - **Locks:** Unlocking a lock drive does not open its latch. A lock sensor only reports state and cannot operate the lock.

@@ -55,10 +55,12 @@ import {
     illuminance,
     meterEnergy,
     percent100ths,
+    thermostatActivity,
 } from "./mapping.js";
 
 export interface EntityContext {
     groups?: Readonly<Record<string, HmIPGroup>>;
+    getDevices?: () => Readonly<Record<string, HmIPDevice>>;
     coolingEnabled?: boolean;
     vendorId: number;
     lockPins: Record<string, string>;
@@ -108,6 +110,7 @@ export class BridgedEntity {
     private readonly supportsCt: boolean;
     private readonly metering: boolean;
     private readonly supportsCooling: boolean;
+    private readonly reportsRunningState: boolean;
 
     constructor(
         readonly description: Entity,
@@ -118,6 +121,8 @@ export class BridgedEntity {
         this.device = device;
         this.groups = context.groups ?? {};
         const group = heatingGroup(device, this.groups);
+        const initialActivity = thermostatActivity(device, this.channel, this.groups, context.getDevices?.() ?? {});
+        this.reportsRunningState = initialActivity !== undefined;
         this.supportsCooling =
             group?.cooling === true ||
             (context.coolingEnabled === true &&
@@ -314,38 +319,46 @@ export class BridgedEntity {
                 this.endpoint.createDefaultDoorLockClusterServer();
                 break;
             case "thermostat":
-                if (this.supportsCooling) {
-                    // Changeover belongs to the installation, not an individual room. Do not advertise AutoMode.
-                    this.endpoint.behaviors.require(
-                        MatterbridgeThermostatServer.with(Thermostat.Feature.Heating, Thermostat.Feature.Cooling),
-                        {
-                            controlSequenceOfOperation: Thermostat.ControlSequenceOfOperation.CoolingAndHeating,
-                            localTemperature: 2000,
-                            systemMode: Thermostat.SystemMode.Heat,
-                            occupiedHeatingSetpoint: 2000,
-                            minHeatSetpointLimit: 500,
-                            maxHeatSetpointLimit: 3000,
-                            absMinHeatSetpointLimit: 500,
-                            absMaxHeatSetpointLimit: 3000,
-                            thermostatRunningState: {
-                                heat: false,
-                                cool: false,
-                                fan: false,
-                                heatStage2: false,
-                                coolStage2: false,
-                                fanStage2: false,
-                                fanStage3: false,
-                            },
-                            occupiedCoolingSetpoint: 2000,
-                            minCoolSetpointLimit: 500,
-                            maxCoolSetpointLimit: 3000,
-                            absMinCoolSetpointLimit: 500,
-                            absMaxCoolSetpointLimit: 3000,
-                        },
-                    );
-                } else {
-                    this.endpoint.createDefaultHeatingThermostatClusterServer(20, 20, 5, 30);
-                }
+                this.endpoint.behaviors.require(
+                    MatterbridgeThermostatServer.with(
+                        Thermostat.Feature.Heating,
+                        ...(this.supportsCooling ? [Thermostat.Feature.Cooling] : []),
+                    ),
+                    {
+                        controlSequenceOfOperation: this.supportsCooling
+                            ? Thermostat.ControlSequenceOfOperation.CoolingAndHeating
+                            : Thermostat.ControlSequenceOfOperation.HeatingOnly,
+                        localTemperature: null,
+                        systemMode: Thermostat.SystemMode.Heat,
+                        occupiedHeatingSetpoint: 2000,
+                        minHeatSetpointLimit: 500,
+                        maxHeatSetpointLimit: 3000,
+                        absMinHeatSetpointLimit: 500,
+                        absMaxHeatSetpointLimit: 3000,
+                        ...(this.reportsRunningState
+                            ? {
+                                  thermostatRunningState: {
+                                      heat: group?.cooling !== true && initialActivity === true,
+                                      cool: group?.cooling === true && initialActivity === true,
+                                      fan: false,
+                                      heatStage2: false,
+                                      coolStage2: false,
+                                      fanStage2: false,
+                                      fanStage3: false,
+                                  },
+                              }
+                            : {}),
+                        ...(this.supportsCooling
+                            ? {
+                                  occupiedCoolingSetpoint: 2000,
+                                  minCoolSetpointLimit: 500,
+                                  maxCoolSetpointLimit: 3000,
+                                  absMinCoolSetpointLimit: 500,
+                                  absMaxCoolSetpointLimit: 3000,
+                              }
+                            : {}),
+                    },
+                );
                 if ("humidity" in this.channel) {
                     this.endpoint.createDefaultRelativeHumidityMeasurementClusterServer(null);
                 }
@@ -947,23 +960,20 @@ export class BridgedEntity {
                         cooling ? "occupiedCoolingSetpoint" : "occupiedHeatingSetpoint",
                         finite(target) ? Math.round(target * 100) : undefined,
                     );
-                    const valve = group?.valvePosition ?? c.valvePosition;
-                    const active = finite(valve)
-                        ? valve > 0
-                        : finite(actual) && finite(target)
-                          ? cooling
-                              ? actual > target
-                              : actual < target
-                          : false;
-                    await set("Thermostat", "thermostatRunningState", {
-                        heat: !cooling && active,
-                        cool: cooling && active,
-                        fan: false,
-                        heatStage2: false,
-                        coolStage2: false,
-                        fanStage2: false,
-                        fanStage3: false,
-                    });
+                    const activity = thermostatActivity(device, c, groups, this.context.getDevices?.() ?? {});
+                    // The optional, non-nullable running state is only exposed for measured valve positions.
+                    // Missing updates retain the last reported value rather than inventing an idle/active state.
+                    if (this.reportsRunningState && activity !== undefined) {
+                        await set("Thermostat", "thermostatRunningState", {
+                            heat: !cooling && activity,
+                            cool: cooling && activity,
+                            fan: false,
+                            heatStage2: false,
+                            coolStage2: false,
+                            fanStage2: false,
+                            fanStage3: false,
+                        });
+                    }
                     if (group) {
                         await set("Thermostat", "minHeatSetpointLimit", Math.round((group.minTemperature ?? 5) * 100));
                         await set("Thermostat", "maxHeatSetpointLimit", Math.round((group.maxTemperature ?? 30) * 100));
