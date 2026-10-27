@@ -9,6 +9,7 @@ import {
     type HmIPSessionTransport,
     type HmIPState,
     type HmIPStateChange,
+    isHmIPRecord,
 } from "homematicip-cloud-client-ts";
 import {MatterbridgeDynamicPlatform, type PlatformConfig, type PlatformMatterbridge} from "matterbridge";
 import type {AnsiLogger} from "matterbridge/logger";
@@ -34,6 +35,7 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
     readonly entities = new Map<string, BridgedEntity>();
     private readonly devices = new Map<string, HmIPDevice>();
     private groups: Record<string, HmIPGroup> = {};
+    private coolingEnabled = false;
     private readonly settings: Configuration;
     private readonly client: CloudClient;
     private session?: HmIPSession;
@@ -94,6 +96,9 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
 
     private async applySnapshot(state: HmIPState): Promise<void> {
         this.groups = state.groups;
+        this.coolingEnabled = Object.values(state.home?.functionalHomes ?? {}).some(
+            (solution) => isHmIPRecord(solution) && solution.coolingEnabled === true,
+        );
         for (const id of this.devices.keys()) {
             if (!state.devices[id]) {
                 await this.removeDevice(id);
@@ -147,6 +152,7 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
                     }
                     entity = new BridgedEntity({...description, label}, device, {
                         groups: this.groups,
+                        coolingEnabled: this.coolingEnabled,
                         vendorId: this.matterbridge.aggregatorVendorId,
                         lockPins: this.settings.lockPins,
                         deviceCommand: (operation, address, body) => {
@@ -193,6 +199,9 @@ export class HmIPPlatform extends MatterbridgeDynamicPlatform {
 
     private async applyChanges(change: HmIPStateChange, state: HmIPState): Promise<void> {
         this.groups = state.groups;
+        this.coolingEnabled = Object.values(state.home?.functionalHomes ?? {}).some(
+            (solution) => isHmIPRecord(solution) && solution.coolingEnabled === true,
+        );
         let groupsChanged = false;
         for (const event of Object.values(change.events)) {
             switch (event.pushEventType) {

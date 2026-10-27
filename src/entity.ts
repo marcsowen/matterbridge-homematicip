@@ -59,6 +59,7 @@ import {
 
 export interface EntityContext {
     groups?: Readonly<Record<string, HmIPGroup>>;
+    coolingEnabled?: boolean;
     vendorId: number;
     lockPins: Record<string, string>;
     command: HmIPCommand;
@@ -117,7 +118,12 @@ export class BridgedEntity {
         this.device = device;
         this.groups = context.groups ?? {};
         const group = heatingGroup(device, this.groups);
-        this.supportsCooling = group?.cooling === true || (isHmIPRecord(group) && group.coolingAllowed === true);
+        this.supportsCooling =
+            group?.cooling === true ||
+            (context.coolingEnabled === true &&
+                isHmIPRecord(group) &&
+                group.coolingAllowed === true &&
+                group.coolingIgnored !== true);
         const features = this.channel.supportedOptionalFeatures as Record<string, unknown> | undefined;
         this.supportsHue = description.kind === "notification" || features?.IOptionalFeatureHueSaturationValue === true;
         this.supportsCt = features?.IOptionalFeatureColorTemperature === true;
@@ -614,6 +620,16 @@ export class BridgedEntity {
             }
             e.subscribeAttribute("Thermostat", "systemMode", (value: unknown, _old: unknown, context) => {
                 if (this.updating || !context.fabric) {
+                    return;
+                }
+                const currentMode = heatingGroup(this.device, this.groups)?.cooling === true ? 3 : 4;
+                if (value !== 0 && value !== currentMode) {
+                    this.context.error(
+                        "Thermostat changeover is controlled by Homematic IP; restoring the current mode.",
+                    );
+                    void e
+                        .setAttribute("Thermostat", "systemMode", currentMode)
+                        .catch(() => this.context.error("Could not restore the thermostat mode."));
                     return;
                 }
                 void this.setMode(value).catch(() => this.context.error("Homematic IP rejected the thermostat mode."));

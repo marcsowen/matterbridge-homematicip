@@ -288,10 +288,37 @@ test("initialized Matter endpoints accept cloud state with correct units and sem
                         vendorId: 65521,
                         lockPins: {},
                         groups: {climate: group},
+                        coolingEnabled: true,
                         command: async (operation, body) => calls.push({operation, body}),
                         deviceCommand: async () => {},
                         error: assert.fail,
                     },
+                );
+                const heatingOnly = new BridgedEntity(
+                    {
+                        id: "heating-only",
+                        deviceId: coolingDevice.id,
+                        kind,
+                        index: 1,
+                        label: "Heating only",
+                        channel: coolingChannel,
+                    },
+                    coolingDevice,
+                    {
+                        vendorId: 65521,
+                        lockPins: {},
+                        groups: {climate: group},
+                        coolingEnabled: false,
+                        command: async () => {},
+                        deviceCommand: async () => {},
+                        error: assert.fail,
+                    },
+                );
+                await aggregator.add(heatingOnly.endpoint);
+                assert.equal(
+                    heatingOnly.endpoint.getAttribute("Thermostat", "featureMap").cooling,
+                    false,
+                    "room coolingAllowed alone does not establish installation cooling capability",
                 );
                 await aggregator.add(climate.endpoint);
                 const read = (attribute) => climate.endpoint.getAttribute("Thermostat", attribute);

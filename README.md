@@ -174,7 +174,7 @@ smart home app's support for the corresponding Matter features.
 
 - **Batteries:** Low-battery status is reported where available. Battery percentage and voltage are omitted because
   the cloud does not provide those measurements for these devices.
-- **Thermostats:** Cooling is exposed when the cloud heating group reports cooling allowed or active at startup.
+- **Thermostats:** Cooling is exposed when enabled for the installation and allowed for the room, or already active, at startup.
   Restart the plugin after enabling cooling for a room. Heat/Cool state and the active setpoint follow Homematic IP;
   changeover remains controlled by Homematic IP, not by individual Matter thermostats. Automatic schedules and boost
   remain in the Homematic IP app. Off selects manual mode and the minimum temperature for heating or maximum for
